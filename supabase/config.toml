@@ -1,0 +1,3 @@
+[functions.telegram-notify]
+# Вызовы БД проверяются в withSupabase по закрытому ключу проекта.
+verify_jwt = false
