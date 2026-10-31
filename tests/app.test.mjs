@@ -1,0 +1,22 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {mkdtempSync,readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import worker from '../worker/index.js';
+const path=join(mkdtempSync(join(tmpdir(),'lending-test-')),'test.sqlite');
+let db=new DatabaseSync(path);db.exec(readFileSync(new URL('../drizzle/0000_applications.sql',import.meta.url),'utf8'));
+const env={DB:{prepare(sql){return {bind(...values){return {async run(){return db.prepare(sql).run(...values)}}},async all(){return {results:db.prepare(sql).all()}}}}}};
+const request=(data,extra={})=>new Request('https://example.com/api/applications',{method:'POST',headers:{'Content-Type':'application/json',...extra},body:JSON.stringify(data)});
+test('form validates, persists to SQLite and survives reopening database',async()=>{
+assert.equal((await worker.fetch(new Request('https://example.com/'),env)).status,200);
+assert.equal((await worker.fetch(request({name:' ',contact:'x'}),env)).status,400);
+assert.equal((await worker.fetch(request({name:'Test',contact:'x'},{Origin:'https://other.com'}),env)).status,403);
+const saved=await worker.fetch(request({name:'  Тест БД  ',contact:'test@example.com'}),env);assert.equal(saved.status,201);const {id}=await saved.json();assert.ok(id);
+db.close();db=new DatabaseSync(path);
+const result=await worker.fetch(new Request('https://example.com/api/applications'),env);const {applications}=await result.json();assert.equal(applications.length,1);assert.equal(applications[0].id,id);assert.equal(applications[0].name,'Тест БД');
+assert.equal((await worker.fetch(request(null),env)).status,400);
+assert.equal((await worker.fetch(request({name:'x'.repeat(81),contact:'x'}),env)).status,400);
+db.close();
+});
